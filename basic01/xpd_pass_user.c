@@ -31,43 +31,139 @@ static const struct option_wrapper long_options[] = {
     {{"auto-mode", no_argument, NULL, 'A'},
     "Auto-detect SKB or native mode"},
 
-    {{"force", no_argument, NULL, "F"},
+    {{"force", no_argument, NULL, 'F'},
     "Force install ,replacing existing program on interface"},
 
-    {{"unload", no_argument, NULL, "U"},
+    {{"unload", no_argument, NULL, 'U'},
     "Unload XDP program intead of loading"},
 
     {{0, 0, NULL, 0},}
+};
+
+
+static int xdp_link_detach(int ifindex, unsigned int xdp_flags){
+    int err;
+
+    if((err = bpf_set_link_xdp_fd(ifindex, -1, xdp_flags)) < 0){
+        fprintf(stderr, "ERR: link set xdp unload failed (err=%d):%s\n",
+            err, strerror(err));
+        return EXIT_FAIL_XDP;
+    }
+    return EXIT_OK;
+
 }
 
-static int xdp_link_detach(int ifindex, __u32 xdp_flags){
-    return 0;
+
+int xdp_link_attach(int ifindex, unsigned int xdp_flags, int prog_fd){
+    int err;
+
+    err = bpf_set_link_xdp_fd(ifindex, prog_fd, xdp_flags);
+    if(err == -EEXIST && !(xdp_flags & XDP_FLAGS_UPDATE_IF_NOEXIST)){
+        //是这重新attach
+        unsigned int old_flags = xdp_flags;
+
+        xdp_flags &= ~XDP_FLAGS_MODES;
+        xdp_flags |= (old_flags &XDP_FLAGS_SKB_MODE) ? XDP_FLAGS_DRV_MODE : XDP_FLAGS_SKB_MODE;
+        err = bpf_set_link_xdp_fd(ifindex, -1, xdp_flags);
+        if(!err){
+            err = bpf_set_link_xdp_fd(ifindex, prog_fd, old_flags);
+        }
+
+    }
+
+    if(err < 0){
+        fprintf(stderr, "ERR: ifindex(%d) link set xdp fd failed (%d): %s\n", ifindex, -err, strerror(-err));
+
+        switch(-err){
+            case EBUSY:
+            case EEXIST:
+                fprintf(stderr, "Hint:XDP already loaded on device"
+                        " use -- force to swap/replace\n");
+                break;
+            case EOPNOTSUPP:
+                fprintf(stderr, "Hint:Native-XDP not supported"
+                            " use --skb-mode or --auto-mode\n");
+                break;
+            default:
+                break;
+
+        }
+        return EXIT_FAIL_XDP;
+    }
+
+    return EXIT_OK;
+
 }
+
+
+int load_bpf_object_file__simple(const char *filename){
+    int first_prog_fd = -1;
+    struct bpf_object *obj;
+    int err;
+
+    err = bpf_prog_load(filename, BPF_PROG_TYPE_XDP, &obj, &first_prog_fd);
+    if(err){
+        fprintf(stderr, "ERR: loading BPF_OBJ file(%s) (%d): %s\n",
+                    filename, err, strerror(-err));
+        return -1;
+    }
+
+    return first_prog_fd;
+}
+
+
+
 
 
 
 int main(int argc, char **argv){
+    
     struct bpf_prog_info info = {};
     __u32 info_len = sizeof(info);
     //需要加载进内核的文件
     char filename[256] = "xdp_pass_kern.o";
-    int prog_fd, err;
+    int prog_fd;
+    int err;
 
     struct config cfg = {
         .xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST | XDP_FLAGS_DRV_MODE,
         .ifindex = -1,
-        .do_unload = false;
+        .do_unload = false,
     };
 
 
     parse_cmdline_args(argc, argv, long_options, &cfg, __doc__);
-    //required option
+    //检查ifindex
     if(cfg.ifindex == -1){
         fprintf(stderr, "ERR: required option --dev missing\n");
 		usage(argv[0], __doc__, long_options, (argc == 1));
 		return EXIT_FAIL_OPTION;
     }
-    if(cfg.co_unload)
+    if(cfg.do_unload)
         return xdp_link_detach(cfg.ifindex, cfg.xdp_flags);
+
+    //将bpf程序载入内核
+    prog_fd = load_bpf_object_file__simple(filename);
+    if(prog_fd <= 0){
+        fprintf(stderr, "ERR: loading file %s\n", filename);
+        return EXIT_FAIL_BPF;
+    }
+
+    //将bpf程序attach到网络上
+    err = xdp_link_attach(cfg.ifindex, cfg.xdp_flags, prog_fd);
+
+    //获取bof_info
+    err = bpf_obj_get_info_by_fd(prog_fd, &info, &info_len);
+    if(err){
+        fprintf(stderr, "ERR: can't get prog info - %s\n", strerror(err));
+        return err;
+    }
+
+    printf("Success: Loading "
+           "XDP prog name:%s(id:%d) on device:%s(ifindex:%d)\n",
+           info.name, info.id, cfg.ifname, cfg.ifindex);
+    return EXIT_OK;
+
+
     
 }
