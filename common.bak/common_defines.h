@@ -25,9 +25,6 @@ struct config {
 	bool xsk_poll_mode;
 };
 
-/* Defined in common_params.o */
-extern int verbose;
-
 /* Exit return codes */
 #define EXIT_OK 		 0 /* == EXIT_SUCCESS (stdlib.h) man exit(3) */
 #define EXIT_FAIL		 1 /* == EXIT_FAILURE (stdlib.h) man exit(3) */
@@ -36,3 +33,4 @@ extern int verbose;
 #define EXIT_FAIL_BPF		40
 
 #endif /* __COMMON_DEFINES_H */
+

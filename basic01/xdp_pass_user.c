@@ -151,8 +151,11 @@ int main(int argc, char **argv){
 
     //将bpf程序attach到网络上
     err = xdp_link_attach(cfg.ifindex, cfg.xdp_flags, prog_fd);
+    if(err){
+        return err;
+    }
 
-    //获取bof_info
+    //获取bpf_info
     err = bpf_obj_get_info_by_fd(prog_fd, &info, &info_len);
     if(err){
         fprintf(stderr, "ERR: can't get prog info - %s\n", strerror(err));
