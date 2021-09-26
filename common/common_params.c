@@ -62,7 +62,7 @@ void usage(const char *prog_name, const char *doc,
 int option_wrappers_to_options(const struct option_wrapper *wrapper,
                 struct option **options){
     int i, num;
-    struct option new_options;
+    struct option *new_options;
     for(i = 0; wrapper[i].option.name != 0; i++) {}
     num = i;
 
@@ -73,7 +73,7 @@ int option_wrappers_to_options(const struct option_wrapper *wrapper,
         memcpy(&new_options[i], &wrapper[i], sizeof(struct option));
     }
 
-    *option = new_options;
+    *options = new_options;
     return 0;
 
 }
